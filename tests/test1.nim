@@ -7,7 +7,7 @@ test "Event Firing":
 
   var eventSystem = EventSystem[ListenerProc].new()
 
-  eventSystem.addListener[:ListenerProc](
+  eventSystem.addListener(
     proc(val: int) =
       echo "A: ", val
   )
