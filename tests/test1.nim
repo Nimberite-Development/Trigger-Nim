@@ -17,5 +17,5 @@ test "Event Firing":
       echo "B: ", val
   )
 
-  eventSystem.fire(1)
-  eventSystem.fire[:ListenerProc](2)
+  eventSystem.fire((1,))
+  eventSystem.fire[:ListenerProc, (int,)]((2,))

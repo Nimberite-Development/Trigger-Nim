@@ -8,35 +8,43 @@
 #!
 #! Unless required by applicable law or agreed to in writing, software
 #! distributed under the License is distributed on an "AS IS" BASIS,
-#! WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#! WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express orimplied.
 #! See the License for the specific language governing permissions and
 #! limitations under the License.
 
 import std/[
-  macros # Used for `unpackVarargs`
+  macros # Used for `newCall`
 ]
 
-type
-  EventListenerAddCondition[T] = proc(es: EventSystem[T]): bool
+macro unpackTuple*(callee: untyped, args: tuple): untyped =
+  result = newCall(callee)
+  for i in 0 ..< args.getTypeImpl.len:
+    result.add nnkBracketExpr.newTree(args, newlit i)
 
-  EventSystem*[T] = object
+type
+  EventListenerAddCondition[T: proc] = proc(es: EventSystem[T]): bool
+
+  EventSystem*[T: proc] = object
     ## Simple EventSystem object, very basic and bare bones
     listeners*: seq[T]
     listenerAddCond: EventListenerAddCondition[T]
 
-proc esTrue[T](es: EventSystem[T]): bool = true
+proc esTrue[T: proc](es: EventSystem[T]): bool = true
 
-proc new*[T](_: typedesc[EventSystem[T]], listenerAddCond: EventListenerAddCondition[T] = esTrue): EventSystem[T] =
+proc new*[T: proc](_: typedesc[EventSystem[T]], listenerAddCond: EventListenerAddCondition[T] = esTrue): EventSystem[T] =
   ## Creates a new EventSystem object
-  result.listeners = newSeq[T]()
-  result.listenerAddCond = listenerAddCond
+  EventSystem[T](
+    listeners: newSeq[T](),
+    listenerAddCond: listenerAddCond
+  )
 
-proc addListener*[T](es: var EventSystem[T], listener: T) =
+proc addListener*[T: proc](es: var EventSystem[T], listener: T) =
   # Registers a listener to the EventSystem
   if es.listenerAddCond(es):
     es.listeners.add(listener)
 
-template fire*[T](es: EventSystem[T], args: varargs[untyped]) =
+proc fire*[T: proc, R: tuple](es: EventSystem[T], args: R) =
   ## Passes the data in `args` to every registered listener
   for listener in es.listeners:
-    unpackVarargs(listener, args)
+    unpackTuple(listener, args)
+
