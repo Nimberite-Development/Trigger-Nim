@@ -24,8 +24,6 @@ macro unpackTuple*(callee: untyped, args: tuple): untyped =
     result.add nnkBracketExpr.newTree(args, newlit i)
 
 type
-  NonAsyncEventDefect* = object of Defect
-
   EventSystem*[T: proc, R: tuple] = ref object
     ## Simple EventSystem object, very basic and bare bones
     listeners*: seq[T]
@@ -81,9 +79,8 @@ proc fire*[T: proc, R: tuple](es: EventSystem[T, R]) =
 proc asyncFire*[T: proc, R: tuple](es: EventSystem[T, R], args: R) {.async.} =
   ## Passes the data in `args` to every registered listener and
   ## runs asynchronously
-  if not compiles(await unpackTuple(default(T), default(R))):
-    raise newException(NonAsyncEventDefect,
-      "The EventSystem was not created using asynchronous procs!")
+  when not compiles(await unpackTuple(default(T), default(R))):
+    {.error: "The event system is not async!".}
 
   for listener in es.listeners:
     try:
@@ -94,9 +91,8 @@ proc asyncFire*[T: proc, R: tuple](es: EventSystem[T, R], args: R) {.async.} =
 proc asyncFire*[T: proc, R: tuple](es: EventSystem[T, R]) {.async.} =
   ## Triggers all registered listeners with the first event data tuple
   ## in the queue
-  if not compiles(await unpackTuple(default(T), default(R))):
-    raise newException(NonAsyncEventDefect,
-      "The EventSystem was not created using asynchronous procs!")
+  when not compiles(await unpackTuple(default(T), default(R))):
+    {.error: "The event system is not async!".}
 
   withLock(es.lock):
     if es.queue.len > 0:
