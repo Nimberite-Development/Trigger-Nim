@@ -1,21 +1,46 @@
 import unittest
+import asyncdispatch
 
 import trigger
 
-test "Event Firing":
+type EventData = (int,)
+
+test "Synchronous Event Firing":
   type ListenerProc = proc(val: int)
 
-  var eventSystem = EventSystem[ListenerProc].new()
+  var es = eventSystem[ListenerProc, EventData]()
 
-  eventSystem.addListener(
+  es.addListener(
     proc(val: int) =
       echo "A: ", val
   )
 
-  eventSystem.addListener[:ListenerProc](
+  es.addListener(
     proc(val: int) =
       echo "B: ", val
   )
 
-  eventSystem.fire((1,))
-  eventSystem.fire[:ListenerProc, (int,)]((2,))
+  es.fire (1,)
+
+  es.queueEvent (2,)
+  es.fire()
+
+test "Asynchronous Event Firing":
+  type ListenerProc = proc(val: int) {.async.}
+
+  var es = eventSystem[ListenerProc, EventData]()
+
+  es.addListener(
+    proc(val: int) {.async.} =
+      echo "A: ", val
+  )
+
+  es.addListener(
+    proc(val: int) {.async.} =
+      echo "B: ", val
+  )
+
+  es.fire (1,)
+
+  es.queueEvent (2,)
+  waitFor es.asyncFire()

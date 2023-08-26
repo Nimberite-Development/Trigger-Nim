@@ -13,7 +13,9 @@
 #! limitations under the License.
 
 import std/[
-  macros # Used for `newCall`
+  asyncdispatch, # Used for async event stuff
+  macros,        # Used for `newCall`
+  locks          # Used for preventing race conditions
 ]
 
 macro unpackTuple*(callee: untyped, args: tuple): untyped =
@@ -22,29 +24,86 @@ macro unpackTuple*(callee: untyped, args: tuple): untyped =
     result.add nnkBracketExpr.newTree(args, newlit i)
 
 type
-  EventListenerAddCondition[T: proc] = proc(es: EventSystem[T]): bool
+  NonAsyncEventDefect* = object of Defect
 
-  EventSystem*[T: proc] = object
+  EventSystem*[T: proc, R: tuple] = ref object
     ## Simple EventSystem object, very basic and bare bones
     listeners*: seq[T]
-    listenerAddCond: EventListenerAddCondition[T]
+    queue: seq[R]
+    lock: Lock = Lock()
 
-proc esTrue[T: proc](es: EventSystem[T]): bool = true
-
-proc new*[T: proc](_: typedesc[EventSystem[T]], listenerAddCond: EventListenerAddCondition[T] = esTrue): EventSystem[T] =
+proc eventSystem*[T: proc, R: tuple](): EventSystem[T, R] =
   ## Creates a new EventSystem object
-  EventSystem[T](
+  result = EventSystem[T, R](
     listeners: newSeq[T](),
-    listenerAddCond: listenerAddCond
+    queue: newSeq[R](),
+    lock: Lock()
   )
 
-proc addListener*[T: proc](es: var EventSystem[T], listener: T) =
-  # Registers a listener to the EventSystem
-  if es.listenerAddCond(es):
-    es.listeners.add(listener)
+  initLock(result.lock)
 
-proc fire*[T: proc, R: tuple](es: EventSystem[T], args: R) =
+proc queueEvent*[T: proc, R: tuple](es: EventSystem[T, R], data: R) =
+  ## Adds event data to the queue
+  withLock(es.lock):
+    es.queue.add data
+
+proc addListener*[T: proc, R: tuple](es: EventSystem[T, R], listener: T) =
+  # Registers a listener to the EventSystem
+  es.listeners.add(listener)
+
+proc fire*[T: proc, R: tuple](es: EventSystem[T, R], args: R) =
   ## Passes the data in `args` to every registered listener
   for listener in es.listeners:
-    unpackTuple(listener, args)
+    try:
+      when compiles(waitFor unpackTuple(listener, args)):
+        waitFor unpackTuple(listener, args)
+      else:
+        unpackTuple(listener, args)
+    except Exception as e:
+      echo e.msg
 
+proc fire*[T: proc, R: tuple](es: EventSystem[T, R]) =
+  ## Triggers all registered listeners with the first event data tuple
+  ## in the queue
+  withLock(es.lock):
+    if es.queue.len > 0:
+      for listener in es.listeners:
+        try:
+          when compiles(waitFor unpackTuple(listener, args)):
+            waitFor unpackTuple(listener, es.queue[0])
+          else:
+            unpackTuple(listener, es.queue[0])
+        except Exception as e:
+          echo e.msg
+
+      es.queue.delete(0)
+
+proc asyncFire*[T: proc, R: tuple](es: EventSystem[T, R], args: R) {.async.} =
+  ## Passes the data in `args` to every registered listener and
+  ## runs asynchronously
+  if not compiles(await unpackTuple(default(T), default(R))):
+    raise newException(NonAsyncEventDefect,
+      "The EventSystem was not created using asynchronous procs!")
+
+  for listener in es.listeners:
+    try:
+      asyncCheck unpackTuple(listener, args)
+    except Exception as e:
+      echo e.msg
+
+proc asyncFire*[T: proc, R: tuple](es: EventSystem[T, R]) {.async.} =
+  ## Triggers all registered listeners with the first event data tuple
+  ## in the queue
+  if not compiles(await unpackTuple(default(T), default(R))):
+    raise newException(NonAsyncEventDefect,
+      "The EventSystem was not created using asynchronous procs!")
+
+  withLock(es.lock):
+    if es.queue.len > 0:
+      for listener in es.listeners:
+        try:
+          asyncCheck unpackTuple(listener, es.queue[0])
+        except Exception as e:
+          echo e.msg
+
+      es.queue.delete(0)
