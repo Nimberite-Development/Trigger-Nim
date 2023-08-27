@@ -8,19 +8,21 @@ type EventData = (int,)
 test "Synchronous Event Firing":
   type ListenerProc = proc(val: int)
 
-  var es = eventSystem[ListenerProc, EventData]()
+  let es = eventSystem[ListenerProc, EventData]()
 
-  es.addListener(
+  discard es.addListener(
     proc(val: int) =
       echo "A: ", val
   )
 
-  es.addListener(
+  let bListener = es.addListener(
     proc(val: int) =
       echo "B: ", val
   )
 
   es.fire (1,)
+
+  es.delListener(bListener)
 
   es.queueEvent (2,)
   es.fire()
@@ -28,19 +30,21 @@ test "Synchronous Event Firing":
 test "Asynchronous Event Firing":
   type ListenerProc = proc(val: int) {.async.}
 
-  var es = eventSystem[ListenerProc, EventData]()
+  let es = eventSystem[ListenerProc, EventData]()
 
-  es.addListener(
+  discard es.addListener(
     proc(val: int) {.async.} =
       echo "A: ", val
   )
 
-  es.addListener(
+  let bListener = es.addListener(
     proc(val: int) {.async.} =
       echo "B: ", val
   )
 
   es.fire (1,)
+
+  es.delListener(bListener)
 
   es.queueEvent (2,)
   waitFor es.asyncFire()

@@ -14,6 +14,7 @@
 
 import std/[
   asyncdispatch, # Used for async event stuff
+  tables,        # Used for storing listeners using IDs
   macros,        # Used for `newCall`
   locks          # Used for preventing race conditions
 ]
@@ -26,14 +27,14 @@ macro unpackTuple*(callee: untyped, args: tuple): untyped =
 type
   EventSystem*[T: proc, R: tuple] = ref object
     ## Simple EventSystem object, very basic and bare bones
-    listeners*: seq[T]
+    listeners*: Table[uint16, T]
     queue: seq[R]
     lock: Lock = Lock()
+    counter: uint16 = 0
 
 proc eventSystem*[T: proc, R: tuple](): EventSystem[T, R] =
   ## Creates a new EventSystem object
   result = EventSystem[T, R](
-    listeners: newSeq[T](),
     queue: newSeq[R](),
     lock: Lock()
   )
@@ -45,13 +46,21 @@ proc queueEvent*[T: proc, R: tuple](es: EventSystem[T, R], data: R) =
   withLock(es.lock):
     es.queue.add data
 
-proc addListener*[T: proc, R: tuple](es: EventSystem[T, R], listener: T) =
-  # Registers a listener to the EventSystem
-  es.listeners.add(listener)
+proc addListener*[T: proc, R: tuple](es: EventSystem[T, R], listener: T): uint16 =
+  # Registers a listener to the EventSystem and returns the ID of the registered listener
+  withLock(es.lock):
+    result = es.counter
+    es.listeners[es.counter] = listener
+
+    es.counter += 1
+
+proc delListener*[T: proc, R: tuple](es: EventSystem[T, R], id: uint16) =
+  withLock(es.lock):
+    es.listeners.del(id)
 
 proc fire*[T: proc, R: tuple](es: EventSystem[T, R], args: R) =
   ## Passes the data in `args` to every registered listener
-  for listener in es.listeners:
+  for listener in es.listeners.values:
     try:
       when compiles(waitFor unpackTuple(listener, args)):
         waitFor unpackTuple(listener, args)
@@ -65,7 +74,7 @@ proc fire*[T: proc, R: tuple](es: EventSystem[T, R]) =
   ## in the queue
   withLock(es.lock):
     if es.queue.len > 0:
-      for listener in es.listeners:
+      for listener in es.listeners.values:
         try:
           when compiles(waitFor unpackTuple(listener, args)):
             waitFor unpackTuple(listener, es.queue[0])
@@ -82,7 +91,7 @@ proc asyncFire*[T: proc, R: tuple](es: EventSystem[T, R], args: R) {.async.} =
   when not compiles(await unpackTuple(default(T), default(R))):
     {.error: "The event system is not async!".}
 
-  for listener in es.listeners:
+  for listener in es.listeners.values:
     try:
       asyncCheck unpackTuple(listener, args)
     except Exception as e:
@@ -96,7 +105,7 @@ proc asyncFire*[T: proc, R: tuple](es: EventSystem[T, R]) {.async.} =
 
   withLock(es.lock):
     if es.queue.len > 0:
-      for listener in es.listeners:
+      for listener in es.listeners.values:
         try:
           asyncCheck unpackTuple(listener, es.queue[0])
         except Exception as e:
